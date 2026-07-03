@@ -18,9 +18,14 @@ from app.retrieval import Candidate, RetrievalIndex, get_index
 from app.text_utils import tokens
 from app.trace import new_trace_id, now_iso, write_trace
 
-# Mots de liaison typiques d'une question de suivi conversationnel.
-_FOLLOWUP_STARTERS = {"et", "oui", "non", "ok", "les", "le", "la", "ca", "ils",
-                      "elles", "elle", "il", "aussi", "donc", "alors", "puis"}
+# Connecteurs qui marquent une CONTINUATION (ellipse) du sujet precedent.
+_FOLLOWUP_STARTERS = {"et", "oui", "non", "ok", "aussi", "donc", "alors", "puis",
+                      "sinon", "ca", "cela", "meme", "ceux"}
+# Mots interrogatifs: une question qui commence par la est AUTONOME (nouveau
+# sujet), jamais une simple continuation -> pas d'augmentation contextuelle.
+_INTERROGATIVES = {"comment", "quel", "quelle", "quels", "quelles", "ou",
+                   "pourquoi", "quand", "combien", "qui", "quoi", "est",
+                   "peut", "puis", "y"}
 
 
 @dataclass
@@ -55,12 +60,22 @@ class Assistant:
 
     # -- contexte conversationnel --------------------------------------------
     def _is_followup(self, query: str, ctx: SessionContext) -> bool:
+        """Vrai suivi = continuation elliptique, PAS une nouvelle question.
+
+        - commence par un interrogatif (comment/quel/ou...) -> question autonome
+        - commence par un connecteur (et/oui/donc...) -> continuation
+        - fragment tres court sans interrogatif -> continuation
+        """
         toks = tokens(query)
-        if not ctx.last_question:
+        if not ctx.last_question or not toks:
             return False
-        if len(toks) <= self.cfg["conversation"]["followup_max_tokens"]:
+        first = toks[0]
+        if first in _INTERROGATIVES:
+            return False  # question autonome -> ne pas detourner vers l'ancien sujet
+        if first in _FOLLOWUP_STARTERS:
             return True
-        return bool(toks) and toks[0] in _FOLLOWUP_STARTERS
+        # fragment court (ex: "les documents ?") sans interrogatif ni verbe clair
+        return len(toks) <= self.cfg["conversation"]["followup_max_tokens"]
 
     def _augment(self, query: str, ctx: SessionContext) -> str:
         parts = [query]
@@ -124,7 +139,12 @@ class Assistant:
             if top_raw_score < thr["answer"] and self._is_followup(question, ctx):
                 aug = self._augment(question, ctx)
                 cand_aug = self.index.search(aug, top_k=self.cfg["retrieval"]["top_k"])
-                if cand_aug and cand_aug[0].score > top_raw_score:
+                # On n'accepte le contexte que s'il RESTE dans le domaine du
+                # dernier echange (continuite de sujet) ET ameliore le score.
+                # Evite de ressortir la reponse d'un sujet precedent sans rapport.
+                if (cand_aug and cand_aug[0].score > top_raw_score
+                        and cand_aug[0].score >= thr["answer"]
+                        and cand_aug[0].domaine == ctx.last_domain):
                     candidates = cand_aug
                     used_query = aug
                     followup = True
@@ -174,6 +194,12 @@ class Assistant:
                     "orientation": "Clarification",
                     "debug_reason": "score intermediaire ou candidats proches multi-domaines",
                 })
+                # Memoriser le sujet propose pour qu'une confirmation courte
+                # ("oui, le credit conso") reste dans le bon domaine.
+                ctx.last_domain = top.domaine
+                ctx.last_motif = top.motif
+                ctx.last_question = top.question
+                ctx.last_orientation = "Clarification"
             else:
                 # 3b) Reponse FAQ (ANSWER ou ESCALATE selon orientation FAQ)
                 built = build_answer(question, top.reponse, cfg=self.cfg)

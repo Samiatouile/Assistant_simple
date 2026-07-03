@@ -29,6 +29,8 @@ PROMPT_INJECTION_PATTERNS = [
     r"repond\w*\s+hors\s+faq",
     r"(?:fais\s+comme\s+si|imagine\s+que|tu\s+es\s+maintenant|pretends?|joue\s+le\s+role).{0,30}(?:conseiller|banquier|agent|assistant\s+sans)",
     r"(?:contourn|bypass|desactive|desactiver).{0,20}(?:securite|regles|garde)",
+    r"(?:tes|vos|les|quelles?\s+sont\s+tes|donne\w*\s+moi\s+tes)\s*(?:failles?|faiblesses?|vulnerabilit)",
+    r"faille.{0,15}securit",
     r"(?:donnees?|logs?|traces?)\s+internes?",
     r"exfiltr",
     r"jailbreak",
