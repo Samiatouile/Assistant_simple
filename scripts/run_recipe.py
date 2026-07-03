@@ -24,7 +24,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.config import abspath, get_env, load_config  # noqa: E402
 from app.retrieval import load_faq  # noqa: E402
-from app.text_utils import token_overlap  # noqa: E402
+from app.text_utils import normalize, token_overlap  # noqa: E402
 
 RESULT_COLUMNS = [
     "ID", "Domaine", "Type de test", "Question", "Réponse attendue",
@@ -57,7 +57,7 @@ class ApiBackend:
 
 
 # --- Validation ---------------------------------------------------------------
-def classify(row, obtained, max_words):
+def classify(row, obtained, max_words, strict=False):
     ttype = row["Type de test"]
     expected = set(str(row["Comportement attendu"]).split("|"))
     status = obtained.get("status", "")
@@ -66,6 +66,38 @@ def classify(row, obtained, max_words):
     source_id = str(row.get("Source FAQ ID", "") or "")
     expected_answer = str(row.get("Réponse attendue", "") or "")
     too_long = len(answer.split()) > max_words
+
+    # --- Mode STRICT: pas de clemence, retrieval juge sur la bonne ligne FAQ ---
+    if strict and ttype in ("FAQ", "Variante"):
+        exp_ids = row.get("_expected_ids")
+        if not isinstance(exp_ids, set):
+            exp_ids = {source_id} if source_id else set()
+        # En strict, l'escalade n'est "attendue" que si le metier l'a dit
+        # explicitement (Escalade attendue=Oui / Orientation=Escalader),
+        # jamais deduite du theme.
+        esc_expected = bool(row.get("_escalade_expected"))
+        if esc_expected:
+            if status in ("ESCALATE", "SENSITIVE"):
+                return "Conforme", ""
+            return "Mauvaise escalade", "Guardrail - Escalade attendue manquante"
+        if status == "ANSWER":
+            if too_long:
+                return "Réponse trop longue", "Prompt - Réponse trop longue"
+            if exp_ids:
+                if set(matched) & exp_ids:
+                    return "Conforme", ""
+                return "Non conforme", "Retrieval - Mauvais document récupéré"
+            # ID FAQ non resolu -> verification de contenu, sinon a valider
+            if expected_answer and token_overlap(answer, expected_answer) >= 0.6:
+                return "Conforme", ""
+            return "À valider manuellement", "Retrieval - ID FAQ non résolu"
+        if status == "CLARIFY":
+            return "Non conforme", "Retrieval - Ambiguïté (clarification)"
+        if status == "OUT_OF_SCOPE":
+            return "Non conforme", "Retrieval - Document non trouvé"
+        if status in ("SENSITIVE", "REFUSE", "ESCALATE"):
+            return "Mauvaise orientation", "Guardrail - Blocage/escalade incorrect"
+        return "Non conforme", "Modèle - Mauvaise interprétation"
 
     # Cas securite: doit etre bloque (REFUSE)
     if ttype == "Securite":
@@ -133,13 +165,13 @@ def classify(row, obtained, max_words):
     return "Non conforme", "Modèle - Mauvaise interprétation"
 
 
-def run_cases(df, backend, max_words, conversational_groups=None):
+def run_cases(df, backend, max_words, conversational_groups=None, strict=False):
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     results = []
 
     def process(row, session_id):
         obtained = backend.ask(row["Question"], session_id)
-        val, cat = classify(row, obtained, max_words)
+        val, cat = classify(row, obtained, max_words, strict=strict)
         matched = obtained.get("matched_faq_ids", []) or []
         scores = obtained.get("retrieval_scores", []) or []
         results.append({
@@ -313,7 +345,11 @@ def load_external_dataset(path, sheet):
         tf = r.get(c_tf, "") if c_tf else ""
         ttype = "FAQ" if str(tf).strip().lower().startswith(("référence", "reference")) else "Variante"
         crit = str(r.get(c_crit, "")).strip().lower() if c_crit else ""
+        orient_v = str(r.get(c_orient, "")).strip().lower() if c_orient else ""
+        esc_v = str(r.get(c_esc, "")).strip().lower() if c_esc else ""
+        escalade_expected = orient_v == "escalader" or esc_v in ("oui", "o", "yes", "true")
         rows.append({
+            "_escalade_expected": escalade_expected,
             "ID": r.get(c_id, f"EXT-{i+1:04d}") if c_id else f"EXT-{i+1:04d}",
             "Domaine": r.get(c_dom, "") if c_dom else "",
             "Motif de contact": r.get(c_sous, "") if c_sous else "",
@@ -394,6 +430,9 @@ def main():
                     help="Chemin d'un Excel de recette metier (jeu de recette fourni)")
     ap.add_argument("--sheet", type=str, default="Jeu de recette",
                     help="Nom de la feuille du jeu de recette externe")
+    ap.add_argument("--strict", action="store_true",
+                    help="Barème strict: retrieval jugé sur la bonne ligne FAQ, "
+                         "aucune clémence (CLARIFY/OUT_OF_SCOPE = échec)")
     args = ap.parse_args()
 
     cfg = load_config()
@@ -416,8 +455,22 @@ def main():
         df_ext, _, sheet = load_external_dataset(src_path, args.sheet)
         if args.limit:
             df_ext = df_ext.head(args.limit)
+
+        # Mode strict: relier chaque cas a la BONNE ligne FAQ interne via la
+        # reponse officielle (les IDs metier et internes sont dans 2 espaces).
+        if args.strict:
+            faq = load_faq()
+            resp_to_ids = {}
+            for r in faq:
+                resp_to_ids.setdefault(normalize(r["reponse"])[:400], set()).add(r["faq_id"])
+            def _resolve(ans):
+                return resp_to_ids.get(normalize(str(ans))[:400], set())
+            df_ext["_expected_ids"] = df_ext["Réponse attendue"].map(_resolve)
+            n_res = int((df_ext["_expected_ids"].map(len) > 0).sum())
+            print(f"[recette] Mode STRICT actif — IDs FAQ resolus: {n_res}/{len(df_ext)}")
+
         print(f"[recette] Execution: {len(df_ext)} cas")
-        df_results = run_cases(df_ext, backend, max_words).reindex(columns=RESULT_COLUMNS)
+        df_results = run_cases(df_ext, backend, max_words, strict=args.strict).reindex(columns=RESULT_COLUMNS)
 
         res_path = out_dir / "recette_results.xlsx"
         df_results.to_excel(res_path, index=False)

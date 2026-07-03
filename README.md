@@ -180,7 +180,32 @@ En plus des 3 rapports standards, il produit
 `Résultat obtenu`, `Statut`, `Statut assistant` et `Trace ID` renseignées ligne
 par ligne (prêt à remettre aux testeurs).
 
-Règles de conformité appliquées au jeu externe :
+#### Mode strict (`--strict`) — évaluation discriminante
+
+Par défaut, le barème est *indulgent* (adapté à une recette de couverture). Pour
+une évaluation rigoureuse de la qualité du modèle, ajoutez `--strict` :
+
+```bash
+python scripts/run_recipe.py --dataset "..." --strict
+```
+
+En mode strict :
+- le **retrieval est jugé sur la bonne ligne FAQ exacte** (l'ID métier est relié
+  à l'ID FAQ interne via la réponse officielle), pas sur une simple ressemblance
+  de contenu ;
+- **aucune clémence** : `CLARIFY` et `OUT_OF_SCOPE` comptent comme échec ;
+- une escalade `SENSITIVE`/`ESCALATE` n'est acceptée que si elle était
+  **explicitement attendue** (`Escalade attendue = Oui` / `Orientation = Escalader`),
+  jamais déduite du thème.
+
+> Important pour l'interprétation : un jeu de recette de **Dimension 1** (Référence
+> + Variantes) reprend le **texte même de la FAQ** que l'assistant indexe. Le
+> retrieval y est donc quasi trivial, et un score élevé (même en strict) mesure
+> surtout le **bon routage**, pas la généralisation. Pour tester réellement le
+> modèle, utilisez des **paraphrases hors-FAQ** (formulations orales, fautes,
+> Darija) et le jeu **cas sensibles & interdits** (Dimension 2).
+
+Règles de conformité (barème indulgent) appliquées au jeu externe :
 - `Escalade attendue = Oui` ou `Orientation attendue = Escalader` → `ESCALATE`/`SENSITIVE` acceptés ;
 - question à **thème sensible** (perte/vol/fraude/paiement suspect) → une réponse
   de sécurité `SENSITIVE`/`ESCALATE` est considérée conforme (comportement sûr) ;
