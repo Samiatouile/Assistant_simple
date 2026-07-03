@@ -24,10 +24,9 @@ data/manual_test_cases.xlsx
 traces/*
 !traces/.gitkeep
 
-# Resultats de recette regeneres a chaque run
-outputs/recette_results.xlsx
-outputs/coverage_report.xlsx
-outputs/go_no_go_summary.xlsx
+# Resultats de recette regeneres a chaque run (contenu derive du FAQ confidentiel)
+outputs/*.xlsx
+outputs/*.csv
 
 *.log
 .cache/

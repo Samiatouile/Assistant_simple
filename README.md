@@ -162,6 +162,31 @@ python scripts/run_recipe.py --manual-only  # uniquement les cas métier
 python scripts/run_recipe.py --limit 300    # échantillon rapide
 ```
 
+### Exécuter un jeu de recette métier fourni (Excel externe)
+
+Si le métier fournit son propre classeur de recette (ex.
+`Jeu_de_recette_Assistant_Simple_VF.xlsx`, feuille « Jeu de recette »), le
+runner l'accepte directement et **mappe automatiquement** ses colonnes
+(`Question à tester`, `Orientation attendue`, `Escalade attendue`, `Criticité`,
+`Type de formulation`…) — aucun renommage nécessaire :
+
+```bash
+python scripts/run_recipe.py --dataset "data/raw/Jeu_de_recette_Assistant_Simple_VF.xlsx"
+# option: --sheet "Jeu de recette"   (nom de feuille, défaut)
+```
+
+En plus des 3 rapports standards, il produit
+`outputs/<nom>_rempli.xlsx` : **une copie de votre classeur** avec les colonnes
+`Résultat obtenu`, `Statut`, `Statut assistant` et `Trace ID` renseignées ligne
+par ligne (prêt à remettre aux testeurs).
+
+Règles de conformité appliquées au jeu externe :
+- `Escalade attendue = Oui` ou `Orientation attendue = Escalader` → `ESCALATE`/`SENSITIVE` acceptés ;
+- question à **thème sensible** (perte/vol/fraude/paiement suspect) → une réponse
+  de sécurité `SENSITIVE`/`ESCALATE` est considérée conforme (comportement sûr) ;
+- `Type de formulation = Variante orale` → une demande de clarification est acceptée ;
+- `Criticité` Critique/Majeure/Standard → priorités P0/P1/P2.
+
 Produit dans `outputs/` :
 
 - **`recette_results.xlsx`** — un ligne par cas (Réponse attendue/générée, Statut
