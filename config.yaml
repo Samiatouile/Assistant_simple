@@ -1,0 +1,66 @@
+# Configuration de l'Assistant Virtuel MVP
+# Tous les seuils de decision sont ici pour faciliter la recette metier.
+
+app:
+  name: "Assistant Virtuel Simple - MVP"
+  version: "0.1.0"
+  language: "fr"
+  max_answer_words: 120          # au dela -> reponse jugee "trop longue" en recette
+
+paths:
+  faq_raw_dir: "data/raw"
+  faq_processed: "data/processed/faq.jsonl"
+  index_meta: "data/processed/index_meta.json"
+  traces_dir: "traces"
+  outputs_dir: "outputs"
+
+ingestion:
+  # Feuille consolidee prioritaire si elle est presente et complete.
+  preferred_sheet: "All"
+  # Feuilles par domaine utilisees si "All" est absente ou incomplete.
+  domain_sheets:
+    - "Credit"
+    - "Distribution"
+    - "Paiement"
+    - "Qualite"
+    - "Voyage et partenariat"
+    - "Bancassurance"
+    - "Investissement"
+    - "Digital"
+    - "Modele relationnel"
+  # Nombre minimal de lignes pour considerer "All" comme complete.
+  min_rows_all_sheet: 5
+
+retrieval:
+  # Fusion des scores lexicaux
+  weight_word_tfidf: 0.45        # TF-IDF mots (1-2 grams)
+  weight_char_tfidf: 0.40        # TF-IDF char n-grams (fautes / darija)
+  weight_token_overlap: 0.15     # recouvrement lexical normalise
+  char_ngram_min: 3
+  char_ngram_max: 5
+  top_k: 5                       # nombre de candidats remontes
+  use_embeddings: false          # true si sentence-transformers installe
+  embedding_model: "paraphrase-multilingual-MiniLM-L12-v2"
+  weight_embeddings: 0.35        # poids si embeddings actives (renormalise)
+
+thresholds:
+  answer: 0.58                   # >= -> ANSWER (intention claire)
+  clarify_min: 0.32              # entre clarify_min et answer -> CLARIFY
+  out_of_scope: 0.32             # < -> OUT_OF_SCOPE (hors connaissance)
+  clarify_margin: 0.08           # si top1-top2 < marge et top2>=clarify_min -> CLARIFY
+
+conversation:
+  max_history: 6                 # tours conserves par session
+  followup_max_tokens: 4         # question courte -> suivi contextuel probable
+
+llm:
+  enabled: false                 # active uniquement via .env (LLM_ENABLED=true)
+  provider: "none"               # none | openai | anthropic
+  max_tokens: 220
+  temperature: 0.0
+  # Verification post-generation: la reponse LLM doit rester alignee a la source.
+  min_source_overlap: 0.30       # sinon fallback reponse officielle brute
+
+security:
+  # Masquage dans les traces (jamais de secret stocke).
+  mask_digit_run_min: 6          # sequences de >=6 chiffres masquees

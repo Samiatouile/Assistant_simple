@@ -1,0 +1,33 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Le vrai fichier FAQ confidentiel ne doit PAS etre committe.
+# data/raw/ est la zone de depot du vrai Excel FAQ (confidentiel).
+data/raw/*
+!data/raw/.gitkeep
+
+# Donnees derivees (regenerees par les scripts, contenu issu du FAQ confidentiel)
+data/processed/*
+!data/processed/.gitkeep
+data/test_dataset.xlsx
+data/manual_test_cases.xlsx
+
+# Traces d'execution (peuvent contenir des questions utilisateur)
+traces/*
+!traces/.gitkeep
+
+# Resultats de recette regeneres a chaque run
+outputs/recette_results.xlsx
+outputs/coverage_report.xlsx
+outputs/go_no_go_summary.xlsx
+
+*.log
+.cache/
